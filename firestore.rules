@@ -11,6 +11,7 @@ service cloud.firestore {
       allow read: if true;
       allow create: if request.resource.data.status == 'open';
       allow update: if true;
+      allow delete: if true;
     }
 
     // Anyone can read bids (so the class can see standings). A bid can only
@@ -18,13 +19,14 @@ service cloud.firestore {
     // fields/types are accepted.
     match /bids/{bidId} {
       allow read: if true;
-      allow write: if request.resource.data.keys().hasOnly(['roundId', 'name', 'amount', 'submittedAt'])
+      allow create, update: if request.resource.data.keys().hasOnly(['roundId', 'name', 'amount', 'submittedAt'])
                     && request.resource.data.name is string
                     && request.resource.data.name.size() > 0
                     && request.resource.data.name.size() < 60
                     && request.resource.data.amount is number
                     && request.resource.data.amount >= 0
                     && get(/databases/$(database)/documents/rounds/$(request.resource.data.roundId)).data.status == 'open';
+      allow delete: if true;
     }
   }
 }

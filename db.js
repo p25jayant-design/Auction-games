@@ -3,7 +3,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
 import {
   getFirestore, collection, doc, setDoc, updateDoc,
-  query, where, orderBy, limit, onSnapshot, getDocs, serverTimestamp,
+  query, where, orderBy, limit, onSnapshot, getDocs, serverTimestamp, writeBatch,
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { firebaseConfig, CURRENCY } from "./firebase-config.js";
 
@@ -84,6 +84,30 @@ export function subscribeLatestRound(cb) {
 export function subscribeRecentRounds(cb, take = 25) {
   const q = query(roundsCol, orderBy("createdAt", "desc"), limit(take));
   return onSnapshot(q, (snap) => cb(snap.docs.map((d) => ({ id: d.id, ...d.data() }))));
+}
+
+// Deletes every revealed round and its bids. Leaves any round that's
+// currently open or closed (not yet revealed) untouched.
+export async function clearHistory() {
+  const revealedSnap = await getDocs(query(roundsCol, where("status", "==", "revealed")));
+  const roundRefs = revealedSnap.docs.map((d) => d.ref);
+  const roundIds = revealedSnap.docs.map((d) => d.id);
+
+  const bidRefs = [];
+  for (const roundId of roundIds) {
+    const bidsSnap = await getDocs(query(bidsCol, where("roundId", "==", roundId)));
+    bidsSnap.forEach((d) => bidRefs.push(d.ref));
+  }
+
+  const allRefs = [...roundRefs, ...bidRefs];
+  const CHUNK = 450; // stay under Firestore's 500-write batch limit
+  for (let i = 0; i < allRefs.length; i += CHUNK) {
+    const batch = writeBatch(db);
+    allRefs.slice(i, i + CHUNK).forEach((ref) => batch.delete(ref));
+    await batch.commit();
+  }
+
+  return { roundsDeleted: roundRefs.length, bidsDeleted: bidRefs.length };
 }
 
 // ---------------- Bids ----------------
