@@ -8,7 +8,6 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
-<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
 </head>
 <body>
 <div class="wrap">
@@ -42,7 +41,7 @@
         <h3>Share this with the class</h3>
       </div>
       <div class="link-row">
-        <div class="qr-box"><canvas id="qr-canvas"></canvas></div>
+        <div class="qr-box"><img id="qr-canvas" width="168" height="168" alt="QR code linking to the student bidding page" src="data:image/png;base64,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"></div>
         <div>
           <p class="link-text" id="student-link"></p>
           <button id="copy-link" class="btn-ghost" style="margin-top:10px;">Copy link</button>
@@ -96,13 +95,6 @@ if (sessionStorage.getItem("coinbag_sir_ok") === "1") unlock();
 function setupShareLink() {
   const url = new URL("student.html", window.location.href).href;
   document.getElementById("student-link").textContent = url;
-  try {
-    if (typeof QRCode === "undefined") throw new Error("QRCode library did not load");
-    QRCode.toCanvas(document.getElementById("qr-canvas"), url, { width: 168, margin: 1, color: { dark: "#16211B", light: "#F1E9D8" } });
-  } catch (err) {
-    console.error("QR code generation failed:", err);
-    document.getElementById("qr-canvas").outerHTML = `<p class="muted" style="max-width:140px; margin:0; padding:8px;">QR code unavailable — use the link below.</p>`;
-  }
   document.getElementById("copy-link").addEventListener("click", async () => {
     try {
       await navigator.clipboard.writeText(url);
