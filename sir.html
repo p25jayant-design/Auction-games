@@ -96,7 +96,13 @@ if (sessionStorage.getItem("coinbag_sir_ok") === "1") unlock();
 function setupShareLink() {
   const url = new URL("student.html", window.location.href).href;
   document.getElementById("student-link").textContent = url;
-  QRCode.toCanvas(document.getElementById("qr-canvas"), url, { width: 168, margin: 1, color: { dark: "#16211B", light: "#F1E9D8" } });
+  try {
+    if (typeof QRCode === "undefined") throw new Error("QRCode library did not load");
+    QRCode.toCanvas(document.getElementById("qr-canvas"), url, { width: 168, margin: 1, color: { dark: "#16211B", light: "#F1E9D8" } });
+  } catch (err) {
+    console.error("QR code generation failed:", err);
+    document.getElementById("qr-canvas").outerHTML = `<p class="muted" style="max-width:140px; margin:0; padding:8px;">QR code unavailable — use the link below.</p>`;
+  }
   document.getElementById("copy-link").addEventListener("click", async () => {
     try {
       await navigator.clipboard.writeText(url);
@@ -253,7 +259,6 @@ let booted = false;
 function boot() {
   if (booted) return;
   booted = true;
-  setupShareLink();
   subscribeLatestRound((r) => {
     round = r;
     if (r && (r.status === "open" || r.status === "closed")) watchBids(r.id);
@@ -261,6 +266,7 @@ function boot() {
     renderRoundPanel();
   });
   subscribeRecentRounds(renderHistory);
+  try { setupShareLink(); } catch (err) { console.error("Share link setup failed:", err); }
 }
 </script>
 </body>
