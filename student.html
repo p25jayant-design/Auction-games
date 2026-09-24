@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Place your bid — The Coin Bag</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="wrap">
+  <div class="wordmark">
+    <svg width="30" height="30" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <ellipse cx="20" cy="31" rx="14" ry="5" fill="#C9A24B"/>
+      <ellipse cx="20" cy="25" rx="14" ry="5" fill="#E7C976"/>
+      <ellipse cx="20" cy="19" rx="14" ry="5" fill="#C9A24B"/>
+      <ellipse cx="20" cy="13" rx="14" ry="5" fill="#E7C976"/>
+    </svg>
+    <span class="wordmark-text">The Coin Bag</span>
+  </div>
+
+  <div id="app">
+    <div class="panel empty-state">
+      <p class="muted">Connecting…</p>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import { subscribeLatestRound, subscribeMyBid, submitBid, formatCurrency } from "./db.js";
+
+const app = document.getElementById("app");
+const NAME_KEY = "coinbag_name";
+
+let round = null;
+let myBid = null;
+let unsubMyBid = null;
+let editing = false;
+
+function statusPill(status) {
+  const labels = { open: "Open", closed: "Closed", revealed: "Revealed" };
+  return `<span class="pill ${status}">${labels[status] || status}</span>`;
+}
+
+function render() {
+  if (round === null) {
+    app.innerHTML = `
+      <div class="panel empty-state">
+        <h3>No round running yet</h3>
+        <p class="muted">Sir hasn't started a round. This page will update itself the moment one opens — no need to refresh.</p>
+      </div>`;
+    return;
+  }
+
+  if (round.status === "open") {
+    if (myBid && !editing) {
+      renderConfirmed();
+    } else {
+      renderForm();
+    }
+    return;
+  }
+
+  if (round.status === "closed") {
+    app.innerHTML = `
+      <div class="panel">
+        <div class="top-row">
+          <h3>${escapeHtml(round.label || "This round")} is closed</h3>
+          ${statusPill(round.status)}
+        </div>
+        <p class="muted" style="margin-top:10px;">Bidding's closed. Sir is about to reveal what the bag was really worth.</p>
+        ${myBid ? `<p class="muted" style="margin-top:14px;">Your bid was <span class="mono">${formatCurrency(myBid.amount)}</span>, placed as <strong>${escapeHtml(myBid.name)}</strong>.</p>` : `<p class="muted" style="margin-top:14px;">You didn't place a bid this round.</p>`}
+      </div>`;
+    return;
+  }
+
+  if (round.status === "revealed") {
+    renderResult();
+  }
+}
+
+function renderForm() {
+  const savedName = localStorage.getItem(NAME_KEY) || "";
+  const prefillName = (myBid && myBid.name) || savedName;
+  const prefillAmount = myBid ? myBid.amount : "";
+
+  app.innerHTML = `
+    <div class="panel">
+      <div class="top-row">
+        <h3>${escapeHtml(round.label || "Round is open")}</h3>
+        ${statusPill(round.status)}
+      </div>
+      <p class="muted" style="margin-top:8px;">Sir is showing the class a bag of coins. What would you pay for it?</p>
+      <form id="bid-form" style="margin-top:18px;">
+        <div class="field">
+          <label for="name">Your name</label>
+          <input type="text" id="name" name="name" placeholder="e.g. Aditi Shah" value="${escapeAttr(prefillName)}" required maxlength="60">
+        </div>
+        <div class="field">
+          <label for="amount">Your bid</label>
+          <input type="number" id="amount" name="amount" placeholder="0" min="0" step="1" value="${prefillAmount}" inputmode="numeric" required>
+        </div>
+        <button type="submit" class="btn-brass">Place bid</button>
+        ${editing ? `<button type="button" id="cancel-edit" class="btn-ghost" style="margin-left:10px;">Cancel</button>` : ""}
+      </form>
+    </div>`;
+
+  document.getElementById("bid-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const name = document.getElementById("name").value.trim();
+    const amount = Number(document.getElementById("amount").value);
+    if (!name || !Number.isFinite(amount) || amount < 0) return;
+
+    const btn = e.target.querySelector("button[type=submit]");
+    btn.disabled = true;
+    btn.textContent = "Placing…";
+    try {
+      localStorage.setItem(NAME_KEY, name);
+      await submitBid(round.id, name, amount);
+      editing = false;
+      watchMyBid(round.id, name);
+    } catch (err) {
+      console.error(err);
+      btn.disabled = false;
+      btn.textContent = "Place bid";
+    }
+  });
+
+  const cancelBtn = document.getElementById("cancel-edit");
+  if (cancelBtn) cancelBtn.addEventListener("click", () => { editing = false; render(); });
+}
+
+function renderConfirmed() {
+  app.innerHTML = `
+    <div class="panel">
+      <div class="top-row">
+        <h3>${escapeHtml(round.label || "Round is open")}</h3>
+        ${statusPill(round.status)}
+      </div>
+      <p class="muted" style="margin-top:14px;">Bid placed as <strong>${escapeHtml(myBid.name)}</strong></p>
+      <p class="hero-figure" style="margin-top:4px;">${formatCurrency(myBid.amount)}</p>
+      <div class="btn-row">
+        <button id="edit-bid" class="btn-ghost">Edit bid</button>
+      </div>
+    </div>`;
+  document.getElementById("edit-bid").addEventListener("click", () => { editing = true; render(); });
+}
+
+function renderResult() {
+  const iWon = myBid && round.winnerName && myBid.name.trim().toLowerCase() === round.winnerName.trim().toLowerCase();
+  const value = round.actualValue;
+  const winnerBid = round.winnerBid;
+  let boxClass = "result-even";
+  let headline = "";
+  let detail = "";
+
+  const winnerName = escapeHtml(round.winnerName || "");
+
+  if (round.winnerName === null || round.winnerName === undefined) {
+    boxClass = "result-even";
+    headline = "Nobody bid this round.";
+  } else {
+    const diff = winnerBid - value;
+    if (diff > 0) {
+      boxClass = "result-pay";
+      headline = `${winnerName} bid too high and pays ${formatCurrency(diff)}`;
+      detail = `Bid ${formatCurrency(winnerBid)} for a bag worth ${formatCurrency(value)} — since the bid was higher, ${winnerName} hands over the difference.`;
+    } else if (diff < 0) {
+      boxClass = "result-receive";
+      headline = `${winnerName} bid low and receives ${formatCurrency(-diff)}`;
+      detail = `Bid ${formatCurrency(winnerBid)} for a bag worth ${formatCurrency(value)} — since the bid was lower, ${winnerName} still wins the bag and gets the difference back.`;
+    } else {
+      boxClass = "result-even";
+      headline = `${winnerName} bid it exactly right`;
+      detail = `Bid ${formatCurrency(winnerBid)} for a bag worth exactly that. No money changes hands.`;
+    }
+  }
+
+  app.innerHTML = `
+    <div class="panel">
+      <div class="top-row">
+        <h3>${escapeHtml(round.label || "Round")} — revealed</h3>
+        ${statusPill(round.status)}
+      </div>
+      <div class="result-box ${boxClass}">
+        <div class="result-headline">${headline}</div>
+        <p class="muted" style="margin:0;">${detail}</p>
+      </div>
+      ${myBid ? `<p class="muted" style="margin-top:16px;">Your bid was <span class="mono">${formatCurrency(myBid.amount)}</span>${iWon ? " — that was you!" : "."}</p>` : ""}
+    </div>`;
+}
+
+function watchMyBid(roundId, name) {
+  if (unsubMyBid) unsubMyBid();
+  myBid = null;
+  if (!name) { render(); return; }
+  unsubMyBid = subscribeMyBid(roundId, name, (bid) => {
+    myBid = bid;
+    render();
+  });
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function escapeAttr(s) { return escapeHtml(s); }
+
+subscribeLatestRound((r) => {
+  const roundChanged = !round || !r || round.id !== r.id;
+  round = r;
+  if (roundChanged) {
+    const savedName = localStorage.getItem(NAME_KEY);
+    if (r && savedName) watchMyBid(r.id, savedName);
+    else { myBid = null; render(); }
+  } else {
+    render();
+  }
+});
+</script>
+</body>
+</html>

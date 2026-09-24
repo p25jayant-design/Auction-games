@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Run the game — The Coin Bag</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+</head>
+<body>
+<div class="wrap">
+
+  <div id="pin-gate" class="pin-gate">
+    <div class="wordmark" style="justify-content:center;">
+      <span class="wordmark-text">The Coin Bag</span>
+    </div>
+    <p class="muted" style="margin-top:6px;">Teacher view</p>
+    <div class="panel">
+      <label for="pin">Enter PIN</label>
+      <input type="text" id="pin" inputmode="numeric" autocomplete="off" placeholder="••••">
+      <button id="pin-submit" class="btn-brass" style="width:100%; margin-top:14px;">Unlock</button>
+      <div class="pin-error" id="pin-error"></div>
+    </div>
+  </div>
+
+  <div id="dashboard" style="display:none;">
+    <div class="wordmark">
+      <svg width="30" height="30" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <ellipse cx="20" cy="31" rx="14" ry="5" fill="#C9A24B"/>
+        <ellipse cx="20" cy="25" rx="14" ry="5" fill="#E7C976"/>
+        <ellipse cx="20" cy="19" rx="14" ry="5" fill="#C9A24B"/>
+        <ellipse cx="20" cy="13" rx="14" ry="5" fill="#E7C976"/>
+      </svg>
+      <span class="wordmark-text">The Coin Bag</span>
+    </div>
+
+    <div class="panel">
+      <div class="top-row">
+        <h3>Share this with the class</h3>
+      </div>
+      <div class="link-row">
+        <div class="qr-box"><canvas id="qr-canvas"></canvas></div>
+        <div>
+          <p class="link-text" id="student-link"></p>
+          <button id="copy-link" class="btn-ghost" style="margin-top:10px;">Copy link</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" id="round-panel"></div>
+
+    <div class="panel" id="history-panel">
+      <h3>Past rounds</h3>
+      <div id="history-list" style="margin-top:10px;"></div>
+    </div>
+  </div>
+
+</div>
+
+<script type="module">
+import {
+  startNewRound, closeRound, revealRound,
+  subscribeLatestRound, subscribeBids, subscribeRecentRounds, formatCurrency,
+} from "./db.js";
+
+// Change this before you deploy — this is a soft deterrent for a classroom,
+// not real security. See README.md, "Security note".
+const SIR_PIN = "2468";
+
+const pinGate = document.getElementById("pin-gate");
+const dashboard = document.getElementById("dashboard");
+const pinInput = document.getElementById("pin");
+const pinError = document.getElementById("pin-error");
+
+function unlock() {
+  sessionStorage.setItem("coinbag_sir_ok", "1");
+  pinGate.style.display = "none";
+  dashboard.style.display = "block";
+  boot();
+}
+
+document.getElementById("pin-submit").addEventListener("click", tryUnlock);
+pinInput.addEventListener("keydown", (e) => { if (e.key === "Enter") tryUnlock(); });
+function tryUnlock() {
+  if (pinInput.value === SIR_PIN) { unlock(); }
+  else { pinError.textContent = "That's not it — try again."; pinInput.value = ""; pinInput.focus(); }
+}
+
+if (sessionStorage.getItem("coinbag_sir_ok") === "1") unlock();
+
+// ---------------- QR + link ----------------
+
+function setupShareLink() {
+  const url = new URL("student.html", window.location.href).href;
+  document.getElementById("student-link").textContent = url;
+  QRCode.toCanvas(document.getElementById("qr-canvas"), url, { width: 168, margin: 1, color: { dark: "#16211B", light: "#F1E9D8" } });
+  document.getElementById("copy-link").addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(url);
+      const btn = document.getElementById("copy-link");
+      const original = btn.textContent;
+      btn.textContent = "Copied";
+      setTimeout(() => { btn.textContent = original; }, 1400);
+    } catch (err) { console.error(err); }
+  });
+}
+
+// ---------------- Round panel ----------------
+
+let round = null;
+let bids = [];
+let unsubBids = null;
+
+const roundPanel = document.getElementById("round-panel");
+
+function statusPill(status) {
+  const labels = { open: "Open", closed: "Closed", revealed: "Revealed" };
+  return `<span class="pill ${status}">${labels[status] || status}</span>`;
+}
+
+function renderRoundPanel() {
+  if (!round || round.status === "revealed") {
+    roundPanel.innerHTML = `
+      <h3>${round ? "Ready for the next round" : "Start the game"}</h3>
+      ${round ? renderRevealedSummary(round) : `<p class="muted" style="margin-top:8px;">Show the class the bag, then start a round.</p>`}
+      <form id="start-form" style="margin-top:${round ? "20px" : "18px"};">
+        <div class="field">
+          <label for="round-label">Round name (optional)</label>
+          <input type="text" id="round-label" placeholder="e.g. Round 3" maxlength="40">
+        </div>
+        <button type="submit" class="btn-brass">Start new round</button>
+      </form>`;
+    document.getElementById("start-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const label = document.getElementById("round-label").value;
+      const btn = e.target.querySelector("button");
+      btn.disabled = true;
+      btn.textContent = "Starting…";
+      try { await startNewRound(label); }
+      catch (err) { console.error(err); btn.disabled = false; btn.textContent = "Start new round"; }
+    });
+    return;
+  }
+
+  const leader = bids[0];
+  const rowsHtml = bids.length
+    ? bids.map((b, i) => `
+        <tr class="${i === 0 ? "leader" : ""}">
+          <td class="rank mono">${i + 1}</td>
+          <td>${escapeHtml(b.name)}</td>
+          <td class="amount">${formatCurrency(b.amount)}</td>
+        </tr>`).join("")
+    : `<tr><td colspan="3" class="muted" style="padding:14px 10px;">No bids yet.</td></tr>`;
+
+  roundPanel.innerHTML = `
+    <div class="top-row">
+      <h3>${escapeHtml(round.label || "Current round")}</h3>
+      ${statusPill(round.status)}
+    </div>
+
+    <div style="margin-top:16px;">
+      <div class="hero-figure">${leader ? formatCurrency(leader.amount) : "—"}</div>
+      <div class="hero-label">${leader ? `highest bid — ${escapeHtml(leader.name)}` : "no bids yet"} · ${bids.length} bid${bids.length === 1 ? "" : "s"} so far</div>
+    </div>
+
+    <table class="ledger">
+      <thead><tr><th></th><th>Name</th><th>Bid</th></tr></thead>
+      <tbody>${rowsHtml}</tbody>
+    </table>
+
+    ${round.status === "open" ? `
+      <div class="btn-row">
+        <button id="close-round" class="btn-rust">Close bidding</button>
+      </div>` : ""}
+
+    ${round.status === "closed" ? `
+      <form id="reveal-form" style="margin-top:20px;">
+        <div class="field">
+          <label for="actual-value">What is the bag actually worth?</label>
+          <input type="number" id="actual-value" min="0" step="1" placeholder="0" inputmode="numeric" required>
+        </div>
+        <button type="submit" class="btn-brass">Reveal to the class</button>
+      </form>` : ""}
+  `;
+
+  const closeBtn = document.getElementById("close-round");
+  if (closeBtn) closeBtn.addEventListener("click", async () => {
+    closeBtn.disabled = true;
+    closeBtn.textContent = "Closing…";
+    try { await closeRound(round.id); }
+    catch (err) { console.error(err); closeBtn.disabled = false; closeBtn.textContent = "Close bidding"; }
+  });
+
+  const revealForm = document.getElementById("reveal-form");
+  if (revealForm) revealForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const value = Number(document.getElementById("actual-value").value);
+    if (!Number.isFinite(value) || value < 0) return;
+    const btn = e.target.querySelector("button");
+    btn.disabled = true;
+    btn.textContent = "Revealing…";
+    try { await revealRound(round.id, value); }
+    catch (err) { console.error(err); btn.disabled = false; btn.textContent = "Reveal to the class"; }
+  });
+}
+
+function renderRevealedSummary(r) {
+  if (!r.winnerName) return `<p class="muted" style="margin-top:8px;">${escapeHtml(r.label || "Last round")} had no bids.</p>`;
+  const diff = r.winnerBid - r.actualValue;
+  const verb = diff > 0 ? `paid ${formatCurrency(diff)}` : diff < 0 ? `received ${formatCurrency(-diff)}` : `broke even`;
+  return `<p class="muted" style="margin-top:8px;">${escapeHtml(r.label || "Last round")}: <strong>${escapeHtml(r.winnerName)}</strong> won with ${formatCurrency(r.winnerBid)} against a bag worth ${formatCurrency(r.actualValue)} — ${verb}.</p>`;
+}
+
+function watchBids(roundId) {
+  if (unsubBids) unsubBids();
+  bids = [];
+  unsubBids = subscribeBids(roundId, (b) => { bids = b; renderRoundPanel(); });
+}
+
+// ---------------- History ----------------
+
+function renderHistory(rounds) {
+  const revealed = rounds.filter((r) => r.status === "revealed");
+  const list = document.getElementById("history-list");
+  if (!revealed.length) {
+    list.innerHTML = `<p class="muted">Revealed rounds will show up here.</p>`;
+    return;
+  }
+  list.innerHTML = revealed.map((r) => {
+    if (!r.winnerName) {
+      return `<div class="history-row"><div class="history-left">${escapeHtml(r.label || "Round")}</div><div class="history-right muted">no bids</div></div>`;
+    }
+    const diff = r.winnerBid - r.actualValue;
+    const verb = diff > 0 ? `pays ${formatCurrency(diff)}` : diff < 0 ? `receives ${formatCurrency(-diff)}` : `even`;
+    return `
+      <div class="history-row">
+        <div class="history-left">${escapeHtml(r.label || "Round")}<br><span class="muted">${escapeHtml(r.winnerName)} — ${formatCurrency(r.winnerBid)} bid, worth ${formatCurrency(r.actualValue)}</span></div>
+        <div class="history-right mono">${verb}</div>
+      </div>`;
+  }).join("");
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+// ---------------- Boot ----------------
+
+let booted = false;
+function boot() {
+  if (booted) return;
+  booted = true;
+  setupShareLink();
+  subscribeLatestRound((r) => {
+    round = r;
+    if (r && (r.status === "open" || r.status === "closed")) watchBids(r.id);
+    else { if (unsubBids) unsubBids(); bids = []; }
+    renderRoundPanel();
+  });
+  subscribeRecentRounds(renderHistory);
+}
+</script>
+</body>
+</html>
